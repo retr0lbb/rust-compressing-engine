@@ -1,4 +1,4 @@
-use std::{collections::HashMap, format, fs::{self, File, Metadata}, io::Write, ops::Add, path::{self, Path}, println, string, vec};
+use std::{collections::HashMap, format, fs::{self, File, Metadata}, io::Write, ops::Add, path::{self, Path}, println, result, string, vec};
 use clap::{ArgGroup, Parser};
 use std::path::PathBuf;
 
@@ -522,79 +522,25 @@ fn print_size_table(original: u64, compressed: u64) {
 }
 
 fn main() {
-    let mut letters_map: HashMap<char, u32> = HashMap::new();
+    let cli = Cli::parse();
 
-    let input_path = Path::new("./input/hello.txt");
+    let result = if let Some(input) = &cli.compress {
+        compress_file(input, &cli.output)
+    } else if let Some(input) = &cli.decompress {
+        decompress_file(input, &cli.output)
+    } else {
+        return unreachable!("clap garante que uma das flags foi passada")
+    };
 
-    let contents = open_file(input_path).unwrap();
-
-    fill_map(&mut letters_map, contents.0.clone());
-
-    let root_tree_node = build_huffman_tree(&contents.0).unwrap();
-
-    //B-Tree
-    let mut tree_bytes: Vec<u8> = Vec::new();
-    let _ = transform_binary_tree_in_bytes(&root_tree_node, &mut tree_bytes);
-    let tree_size = u32::try_from(tree_bytes.len())
-        .map_err(|_| "Tree too large");
-
-    let encode_map = build_encoded_map(&root_tree_node);
-
-    let (result, result_size) = encode_content(contents.0.clone(), &encode_map).unwrap();
-    let encoded_bit_size = result_size;
-
-    let document: Vec<u8> = serialize_huffman_document(
-        &DocumentHeader { 
-            magic_bytes: [72, 85, 70, 70], //HUFF 
-            original_file_size: contents.1.len(), 
-            binary_tree: tree_bytes, 
-            binary_tree_size: tree_size.unwrap(), 
-            encoded_bit_size },
-            &DocumentBody { 
-                binary_content: result
-            }
-        );
-
-    let exit_path = Path::new("./output/compressed.huff");
-    save_huffman_document(document, &exit_path);
-
-    let compressed_file = open_compressed_file(exit_path).unwrap();
-
-    let (serialized_tree, serialized_content, new_bit_size, original_file_size) = desserialize_document(&compressed_file).unwrap();
-
-    let mut position = 0;
-
-    let root = deserialize_tree(&serialized_tree, &mut position).unwrap();
-    assert_eq!(position, serialized_tree.len());
-
-    let mut new_encode_map = build_encoded_map(&root);
-
-    let new_encode_map_reversed: HashMap<String, char> = new_encode_map
-        .iter()
-        .map(|(&character, code)| (code.clone(), character))
-        .collect();
-
-
-    // let result_2 = desserialize_content(&serialized_content, new_bit_size, &root); JEITO MAIS NERD DE FAZER ISSO
-
-    let mut binary_string = String::new();
-
-    for bit_index in 0..encoded_bit_size {
-        let byte_index = (bit_index / 8) as usize;
-        let bit_position = 7 - (bit_index % 8);
-
-        let byte = serialized_content[byte_index];
-
-        let bit = (byte >> bit_position) & 1;
-
-        binary_string.push(if bit == 0 { '0' } else { '1' });
+    match result {
+        Ok((path, original, compressed)) => {
+            println!("Arquivo gerado: {}", path.display());
+            print_size_table(original, compressed);
+        }
+        Err(error) => {
+            eprintln!("Erro: {}", error);
+            std::process::exit(1);
+        }
     }
-
-
-    let result_3 = decode_content(binary_string, &new_encode_map_reversed).unwrap();
-
-    let exit_path = Path::new("./output/decompressed.txt");
-    save_normal_file(result_3, exit_path)
-
 }
 
